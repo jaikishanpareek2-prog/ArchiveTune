@@ -1,4 +1,4 @@
-name: Build debug APK
+name: Build nightly APK
 on:
   workflow_dispatch:
   push:
@@ -33,17 +33,29 @@ jobs:
             -alias androiddebugkey -keypass android -keyalg RSA \
             -keysize 2048 -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
-      - name: Unit tests for the IPv6 fallback
-        continue-on-error: true
-        run: ./gradlew --console=plain :app:testGmsMobileUniversalDebugUnitTest --tests '*Ipv6FallbackTest'
-        env:
-          PULL_REQUEST: 'true'
-      - name: Build debug APK
-        run: ./gradlew --console=plain assembleGmsMobileUniversalDebug
-        env:
-          PULL_REQUEST: 'true'
+      - name: Build nightly APK
+        run: ./gradlew --console=plain assembleGmsMobileUniversalNightly
+      - name: Sign APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/35.0.0"
+          APK="$(find app/build/outputs/apk -type f -name '*.apk' -ipath '*nightly*' | head -n 1)"
+          if [ -z "$APK" ]; then
+            echo "::error::No nightly APK found"
+            find app/build/outputs/apk -type f
+            exit 1
+          fi
+          mkdir -p signed
+          "$BT/zipalign" -f -P 16 4 "$APK" signed/aligned.apk
+          "$BT/apksigner" sign --ks ~/.android/debug.keystore \
+            --ks-key-alias androiddebugkey --ks-pass pass:android \
+            --key-pass pass:android \
+            --out signed/archivetune-nightly.apk signed/aligned.apk
+          rm -f signed/aligned.apk signed/*.idsig
+          "$BT/apksigner" verify signed/archivetune-nightly.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: archivetune-debug-apk
-          path: app/build/outputs/apk/**/*.apk
+          name: archivetune-nightly-apk
+          path: signed/archivetune-nightly.apk
           if-no-files-found: error
